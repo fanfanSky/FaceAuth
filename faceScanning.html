@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实人认证</title>
+  <link rel="stylesheet" href="./css/reset.css">
+  <link rel="stylesheet" href="./css/faceScanning.css">
+  <link rel="stylesheet" href="./css/Vant.css">
+  <script src="./js/vue.js"></script>
+  <script src="./js/Vant.js"></script>
+  <script src="./js/html2canvas.min.js"></script>
+</head>
+<body>
+  <div class="container" id="app">
+    <div class="head-h">
+      <div class="head-box">
+          <div class="icon-l" @click="goBack"><img src="./imgs/icon-left.png" alt=""></div>
+          <div class="text-box">实人认证</div>
+      </div>
+    </div>
+    <div class="content-box">
+      <div class="camera-box">
+        <video class="video" ref="refVideo" controls muted="true"></video>
+        <!-- 正在调起摄像头前期 -->
+        <div class="camera-box-before" v-show="cameraBefore">
+          <canvas id="canvas"></canvas>
+        </div>
+        <!-- 伪元素圆框透明 -->
+        <div class="mask-box"></div>
+        <!-- 加载 -->
+        <div class="loading-box" v-if="status == 2">
+          <div class="ld-item" v-if="loading_1 == 0">
+            <img class="loading-img" src="./imgs/loading.png" alt="" />
+            <div class="text-box">认证中</div>
+          </div>
+          <div class="ld-item" v-if="loading_1 == 1">
+            <img class="success-img" src="./imgs/success-icon.png" alt="" />
+            <div class="text-box">认证成功</div>
+          </div>
+        </div>
+        <!-- 模糊背景 -->
+        <div class="blur-bg" v-if="status == 2"></div>
+        <!-- 转圈圈 -->
+        <div class='circle-box' v-if="status == 1">
+          <div class="left">
+            <div class="leftcircle"></div>
+          </div>
+          <div class="right">
+            <div class="rightcircle"></div>
+          </div>
+        </div>
+        <!-- 转圈结束后将整个圆覆盖 -->
+        <div class="element1" v-if="isShowElement1"></div>
+        <!-- 倒计时结束后将临时图片覆盖上去 -->
+        <div class="temp-img-box" v-show="status == 2">
+          <img class="temp-img" :src="tempThumbPath"/>
+          <div class="temp-img-mask"></div>
+        </div>
+      </div>
+      <div class="examples-box">
+        <span class="tips-text" v-show="status == 0">请保持面部正面在识别区域</span>
+        <span class="tips-text" v-show="status == 1">识别中，请保持姿势不动</span>
+        <span class="tips-text" v-show="status == 2">认证中，请耐心等待</span>
+      </div>
+      <div class="submit-box">
+        <div class="submit-btn submit-btn-1'" v-show="status == 0" @click="startShootVideo()">开始识别</div>
+        <div class="submit-btn submit-btn-2" v-show="status == 1">开始识别({{countdown}}s)</div>
+        <div class="submit-btn submit-btn-2" v-show="status == 2">认证中</div>
+      </div>
+    </div>
+  </div>
+</body>
+<script type="text/javascript">
+  var vue = new Vue({
+    el: '#app',
+    data() {
+      return {
+        cameraBefore: true, // 正在调起摄像头前期
+        status: 0,  // 未开始点击开始识别时的状态
+        loading_1: 0, // 认证中的状态
+        countdown: 5, // 倒计时 5秒
+        tempThumbPath: '',  // 录制视频的临时图片
+        isShowElement1: false, // 是否显示绿色圈圈
+
+        mediaRecorder: {},
+        stream: {},
+      }
+    },
+    mounted() {
+      this.openCamera();
+    },
+    methods: {
+      // 开始录像
+      startShootVideo() {
+        const that = this;
+        // 设置转圈圈效果
+        that.status = 1;
+        // 录制开始
+        this.mediaRecorder.start();
+        // 开始倒计时
+        let second = that.countdown;
+        let time = setInterval(() => {
+            second--
+            that.countdown = second;
+            // 倒计时结束
+            if (second <= 0) {
+                clearInterval(time);
+                that.isShowElement1 = true;
+                // 拍照 - 获取最后一帧视频图片 start
+                that.status = 2;
+                // 要转换为图片的dom对象
+                var elementVideo = document.querySelector('.video');
+                // 要显示图片的img标签
+                var image = document.querySelector('.temp-img')
+                // 方法一： 缺点：图片跨域，清晰度低，圆弧计算精度差，深层节点解析
+                // html2canvas(elementVideo).then(function(canvas) {
+                //     that.tempThumbPath = canvas.toDataURL(1);
+                // });
+                // 方法二
+                new Promise(resolve => {
+                  html2canvas(elementVideo, {
+                    useCORS: true, // 【重要】开启跨域设置，需要后台设置cors
+                    scale: 1, // 放大倍数
+                    width: elementVideo.videoWidth / 2, // 设置图片的宽度
+                    height: elementVideo.videoHeight / 2 // 设置图片的高度
+                  }).then((canvas) => {
+                    that.tempThumbPath = canvas.toDataURL("image/png");
+                    resolve(canvas);
+                  });
+                })
+                // 拍照 - 获取最后一帧视频图片 end
+                // 延迟一秒结束录制的原因是：录制后的视频长度不同步
+                setTimeout(() => {
+                  // 录制结束
+                  that.stopRecord(that.stream)
+                }, 1000);
+            }
+        }, 1000);
+    },
+      // 开启摄像头
+      openCamera(){
+        const that = this
+        // 绘制调起摄像头前期画布
+        this.contextFn()
+        // H5实现录制视频转base64  start
+        that.getUserMedia((error,mediaStream) => {
+          if(error){
+            vant.Toast.fail(error+'')
+            // vant.Toast.fail('您的浏览器暂不支持视频录制功能，请更换浏览器')
+            return;
+          }
+          // 在判断浏览器已支持的情况下，关闭动画
+          setTimeout(() => { that.cameraBefore = false; }, 1000);
+          var video = that.$refs.refVideo;
+          // 获取视频流
+          video.srcObject = mediaStream;
+          video.play();
+          var chunks = []  // 存储数据流
+          that.stream = mediaStream;
+          // 创建MediaRecorder对象
+          that.mediaRecorder = new MediaRecorder(mediaStream);
+          // 视频格式
+          // that.mediaRecorder.mimeType = 'video/webm;codecs=vp8';
+          // 录制过程中
+          that.mediaRecorder.ondataavailable = function(e) {
+            chunks.push(e.data);
+          }
+          // 录制结束
+          that.mediaRecorder.onstop = function(e) {
+            console.log('录制结束,chunks=>>',chunks);
+            console.log('that.mediaRecorder.mimeType=>>',that.mediaRecorder.mimeType);
+            const fullBlob = new Blob(chunks,{ type: that.mediaRecorder.mimeType }); // 数据流转换为 blob
+            const blobURL = window.URL.createObjectURL(fullBlob);
+            console.log("blob is ?, 大小="+parseInt(fullBlob.size/1024)+"KB. ");
+            console.log("fullBlob=>",fullBlob);
+            console.log("blobURL =" + blobURL);                        
+            that.blobToBase64(fullBlob).then((base64) => {
+              console.log("base64=>>",base64);
+              that.testVideo = blobURL;
+              // 调用上传方法
+              // that.uploadVideo(base64);
+            })
+          }
+          // 录制出错
+          that.mediaRecorder.onerror = function(e) {
+            vant.Toast.fail('录制出错')
+          }
+        })
+      },
+      // 获取用户媒体设备和判断浏览器是否支持
+      getUserMedia(callback) {
+        console.log("获取设备信息");
+        const constraints = {
+          audio: true, // 调用录音
+          video: { deviceId: "default", facingMode: "user" /*调用前置摄像头*/ }
+        };
+        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+        if (navigator.getUserMedia) {
+          // 获取视频流
+          navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+            console.log("then");
+            callback(false, stream);
+          }).catch((error) => {
+            callback(error);
+          });
+        } else {
+          callback(new Error("您的浏览器暂不支持视频录制"));
+        }
+      },
+      // 停止录制
+      stopRecord(stream) {
+        // 调用停止录制方法
+        this.mediaRecorder.stop();
+        // 关闭视频流
+        const tracks = stream.getTracks();
+        tracks.forEach(track => {
+          track.stop();
+        });
+      },
+      // blob 转换 base64
+      blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const fileReader = new FileReader();
+          fileReader.onload = e => {
+            resolve(e.target.result);
+          };
+          fileReader.readAsDataURL(blob);
+          fileReader.onerror = () => {
+            reject(new Error("文件流异常"));
+          };
+        });
+      },
+      // 调起摄像头前期动画
+      contextFn(){
+        // 调起摄像头前期动画 start
+        //获取图形对象
+        var canvas = document.getElementById("canvas");
+        //获取图形的上下文
+        var context = canvas.getContext("2d");
+        //设置canvas的宽度和高度
+        var W = canvas.width = 322;
+        var H = canvas.height = 242;
+        //每个文字的字体大小
+        var fontSize = 16;
+        //计算列
+        var colunms = Math.floor(canvas.width / fontSize);
+        //记录每列文字的y轴坐标
+        var drops = [];
+        //给每一个文字初始化一个起始点的位置
+        for(var i = 0;i < colunms; i++){
+          drops.push(0);
+        }
+        //运动的文字
+        var textStr ="01abcdefghijklmnopqurstuvwxyz";
+        //绘画的函数
+        setInterval(() => {
+            context.fillStyle = "rgba(0,0,0,0.05)";
+            context.fillRect(0,0,W,H);
+            //给字体设置样式
+            //context.font = "700 "+fontSize+"px  微软雅黑";
+            context.font = fontSize + 'px arial';
+            //给字体添加颜色
+            context.fillStyle ="green";//随意更改字体颜色
+            //写入图形中
+            for(var i = 0; i < colunms; i++){
+              var index = Math.floor(Math.random() * textStr.length);
+              var x = i * fontSize;
+              var y = drops[i] * fontSize;
+              context.fillText(textStr[index], x, y);
+              //如果要改变时间，肯定就是改变每次他的起点
+              if(y >= canvas.height && Math.random() > 0.92){
+                drops[i] = 0;
+              }
+              drops[i]++;
+            }
+        }, 33);
+        // 调起摄像头前期动画 end
+      },
+      // 返回上一页
+      goBack() {
+        window.history.go(-1)
+      }
+    }
+  })
+</script>
+</html>
